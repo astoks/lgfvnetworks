@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LGFV Capital Flows Between Chinese Cities</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#12141a; --land:#1d212b; --land-edge:#2c3140; --panel:#1a1d26; --panel-edge:#2b2f3c;
+    --paper:#e8e6df; --dim:#9aa0ad; --out:#e0645c; --in:#58b89b; --arc:#c8a45a; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; overflow:hidden; background:var(--ink);
+    font-family:'IBM Plex Sans',sans-serif; color:var(--paper); }
+  svg#stage { position:absolute; inset:0; width:100%; height:100%; }
+  .panel { position:absolute; background:var(--panel); border:1px solid var(--panel-edge);
+    border-radius:10px; padding:16px 18px; box-shadow:0 8px 30px rgba(0,0,0,.45); }
+  #hud { top:18px; left:18px; width:300px; max-height:calc(100vh - 36px); overflow-y:auto; }
+  #hud h1 { font-family:'Fraunces',serif; font-weight:600; font-size:20px; line-height:1.25; }
+  #hud .sub { color:var(--dim); font-size:12.5px; margin:6px 0 12px; line-height:1.5; }
+  .key { font-size:12px; color:var(--dim); line-height:1.9; margin-bottom:6px; }
+  .key .sw { display:inline-block; width:22px; height:3px; border-radius:2px; vertical-align:middle; margin-right:7px; }
+  .key .dot { display:inline-block; width:10px; height:10px; border-radius:50%; vertical-align:middle; margin-right:7px; }
+  .key .sq { display:inline-block; width:9px; height:9px; vertical-align:middle; margin-right:8px; transform:rotate(45deg); }
+  #corr { top:18px; right:18px; width:245px; max-height:calc(100vh - 36px); overflow-y:auto; }
+  #corr h2 { font-family:'Fraunces',serif; font-size:15px; font-weight:600; margin-bottom:3px; }
+  #corr .sub { color:var(--dim); font-size:11.5px; margin-bottom:9px; }
+  .row { display:flex; justify-content:space-between; gap:8px; padding:6px 9px; border-radius:7px;
+    cursor:pointer; font-size:12.5px; }
+  .row:hover { background:var(--ink); }
+  .row.active { background:var(--ink); outline:1px solid var(--arc); }
+  .row .n { font-family:'IBM Plex Mono',monospace; color:var(--dim); font-size:12px; }
+  .row .a { color:#5c6270; padding:0 2px; }
+  #tip { position:absolute; pointer-events:none; background:#0e1015ee; border:1px solid var(--panel-edge);
+    border-radius:8px; padding:10px 12px; font-size:12.5px; max-width:280px; display:none;
+    line-height:1.55; z-index:10; }
+  #tip b { font-weight:500; }
+  #tip .m { color:var(--dim); font-size:11.5px; font-family:'IBM Plex Mono',monospace; }
+  #reset { position:absolute; bottom:18px; left:18px; background:var(--panel); color:var(--paper);
+    border:1px solid var(--panel-edge); border-radius:7px; padding:8px 14px; font-size:12.5px;
+    cursor:pointer; font-family:'IBM Plex Sans',sans-serif; }
+  #reset:hover { background:var(--panel-edge); }
+  @media (max-width:900px){ #corr{display:none;} #hud{width:240px;} }
+</style>
+</head>
+<body>
+<svg id="stage" role="img" aria-label="Map of China showing 215 cross-city LGFV investment relationships as arcs between 81 cities"></svg>
+
+<aside id="hud" class="panel">
+  <h1>Where municipal capital travels</h1>
+  <p class="sub">Each arc bundles the LGFV investment relationships between two localities — 215 cross-city edges across 81 places. Click a city to see its flows; hover anything for detail. Scroll to zoom.</p>
+  <div class="key"><span class="sw" style="background:var(--arc)"></span>capital corridor — arrow points from owner city to owned entity's city; width = number of stakes</div>
+<div class="key" style="color:var(--dim)">Two-way pairs (e.g. Beijing–Shanghai) render as two separate arcs bowing to opposite sides.</div>
+  <div class="key"><span class="dot" style="background:var(--paper)"></span>city (size = total cross-city links)</div>
+  <div class="key"><span class="sq" style="background:var(--dim)"></span>province-level vehicle</div>
+  <div class="key" id="selKey" style="display:none">
+    <span class="sw" style="background:var(--out)"></span>outbound from selected city<br>
+    <span class="sw" style="background:var(--in)"></span>inbound to selected city
+  </div>
+</aside>
+
+<aside id="corr" class="panel">
+  <h2>Corridor index</h2>
+  <p class="sub">Densest routes. Click to trace.</p>
+  <div id="corrList"></div>
+</aside>
+
+<div id="tip"></div>
+<button id="reset">Reset view</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script>
+const DATA = {"cities": [{"name": "(Gansu prov-level)", "lon": 100.8, "lat": 38.2, "out": 0, "in": 1, "prov_level": true}, {"name": "(Guangdong prov-level)", "lon": 114.8, "lat": 23.9, "out": 0, "in": 1, "prov_level": true}, {"name": "(Guangxi prov-level)", "lon": 108.3, "lat": 23.8, "out": 0, "in": 1, "prov_level": true}, {"name": "(Guizhou prov-level)", "lon": 107.5, "lat": 27.2, "out": 0, "in": 2, "prov_level": true}, {"name": "(Hainan prov-level)", "lon": 109.9, "lat": 19.4, "out": 0, "in": 6, "prov_level": true}, {"name": "(Hebei prov-level)", "lon": 116.2, "lat": 38.2, "out": 0, "in": 4, "prov_level": true}, {"name": "(Heilongjiang prov-level)", "lon": 128.0, "lat": 47.0, "out": 0, "in": 1, "prov_level": true}, {"name": "(Henan prov-level)", "lon": 113.6, "lat": 33.9, "out": 4, "in": 3, "prov_level": true}, {"name": "(Hubei prov-level)", "lon": 112.8, "lat": 31.5, "out": 0, "in": 2, "prov_level": true}, {"name": "(Hunan prov-level)", "lon": 111.7, "lat": 27.6, "out": 0, "in": 5, "prov_level": true}, {"name": "(Jiangsu prov-level)", "lon": 119.8, "lat": 33.3, "out": 2, "in": 1, "prov_level": true}, {"name": "(Ningxia prov-level)", "lon": 106.2, "lat": 37.5, "out": 0, "in": 1, "prov_level": true}, {"name": "(Shanxi prov-level)", "lon": 112.0, "lat": 36.5, "out": 0, "in": 2, "prov_level": true}, {"name": "(Sichuan prov-level)", "lon": 102.9, "lat": 30.2, "out": 0, "in": 1, "prov_level": true}, {"name": "(Tibet prov-level)", "lon": 88.0, "lat": 31.0, "out": 0, "in": 2, "prov_level": true}, {"name": "(Xinjiang prov-level)", "lon": 85.0, "lat": 41.5, "out": 0, "in": 2, "prov_level": true}, {"name": "(Yunnan prov-level)", "lon": 101.2, "lat": 24.5, "out": 1, "in": 1, "prov_level": true}, {"name": "(Zhejiang prov-level)", "lon": 119.6, "lat": 29.3, "out": 5, "in": 4, "prov_level": true}, {"name": "Baoding", "lon": 115.46, "lat": 38.87, "out": 0, "in": 2, "prov_level": false}, {"name": "Beijing", "lon": 116.4, "lat": 39.9, "out": 69, "in": 16, "prov_level": false}, {"name": "Bengbu", "lon": 117.39, "lat": 32.92, "out": 3, "in": 0, "prov_level": false}, {"name": "Changsha", "lon": 112.94, "lat": 28.23, "out": 0, "in": 1, "prov_level": false}, {"name": "Chaozhou", "lon": 116.62, "lat": 23.66, "out": 0, "in": 1, "prov_level": false}, {"name": "Chengdu", "lon": 104.07, "lat": 30.57, "out": 7, "in": 3, "prov_level": false}, {"name": "Chongqing", "lon": 106.55, "lat": 29.56, "out": 2, "in": 8, "prov_level": false}, {"name": "Dalian", "lon": 121.61, "lat": 38.91, "out": 2, "in": 2, "prov_level": false}, {"name": "Deyang", "lon": 104.4, "lat": 31.13, "out": 0, "in": 1, "prov_level": false}, {"name": "Dongguan", "lon": 113.75, "lat": 23.02, "out": 0, "in": 7, "prov_level": false}, {"name": "Ezhou", "lon": 114.89, "lat": 30.39, "out": 0, "in": 8, "prov_level": false}, {"name": "Foshan", "lon": 113.12, "lat": 23.02, "out": 1, "in": 0, "prov_level": false}, {"name": "Fuzhou", "lon": 119.3, "lat": 26.08, "out": 0, "in": 3, "prov_level": false}, {"name": "Guangzhou", "lon": 113.26, "lat": 23.13, "out": 6, "in": 7, "prov_level": false}, {"name": "Guiyang", "lon": 106.63, "lat": 26.65, "out": 0, "in": 1, "prov_level": false}, {"name": "Haikou", "lon": 110.33, "lat": 20.03, "out": 0, "in": 2, "prov_level": false}, {"name": "Handan", "lon": 114.54, "lat": 36.63, "out": 0, "in": 3, "prov_level": false}, {"name": "Hangzhou", "lon": 120.15, "lat": 30.27, "out": 2, "in": 7, "prov_level": false}, {"name": "Hefei", "lon": 117.28, "lat": 31.86, "out": 3, "in": 4, "prov_level": false}, {"name": "Hohhot", "lon": 111.75, "lat": 40.84, "out": 1, "in": 1, "prov_level": false}, {"name": "Huanggang", "lon": 114.87, "lat": 30.45, "out": 0, "in": 1, "prov_level": false}, {"name": "Jiaxing", "lon": 120.76, "lat": 30.77, "out": 1, "in": 2, "prov_level": false}, {"name": "Jining", "lon": 116.59, "lat": 35.41, "out": 0, "in": 2, "prov_level": false}, {"name": "Kunming", "lon": 102.83, "lat": 24.88, "out": 11, "in": 0, "prov_level": false}, {"name": "Kunshan", "lon": 120.98, "lat": 31.39, "out": 1, "in": 0, "prov_level": false}, {"name": "Lanzhou", "lon": 103.83, "lat": 36.06, "out": 0, "in": 1, "prov_level": false}, {"name": "Liupanshui", "lon": 104.83, "lat": 26.59, "out": 0, "in": 1, "prov_level": false}, {"name": "Longjing", "lon": 129.42, "lat": 42.77, "out": 0, "in": 1, "prov_level": false}, {"name": "Mianyang", "lon": 104.68, "lat": 31.47, "out": 0, "in": 1, "prov_level": false}, {"name": "Nanjing", "lon": 118.78, "lat": 32.06, "out": 2, "in": 4, "prov_level": false}, {"name": "Nantong", "lon": 120.86, "lat": 32.01, "out": 0, "in": 1, "prov_level": false}, {"name": "Ningbo", "lon": 121.55, "lat": 29.87, "out": 1, "in": 3, "prov_level": false}, {"name": "Ningde", "lon": 119.55, "lat": 26.67, "out": 0, "in": 1, "prov_level": false}, {"name": "Qingdao", "lon": 120.38, "lat": 36.07, "out": 2, "in": 2, "prov_level": false}, {"name": "Qinhuangdao", "lon": 119.6, "lat": 39.94, "out": 0, "in": 3, "prov_level": false}, {"name": "Quanzhou", "lon": 118.59, "lat": 24.91, "out": 0, "in": 1, "prov_level": false}, {"name": "Sanya", "lon": 109.51, "lat": 18.25, "out": 0, "in": 1, "prov_level": false}, {"name": "Shanghai", "lon": 121.47, "lat": 31.23, "out": 15, "in": 16, "prov_level": false}, {"name": "Shantou", "lon": 116.68, "lat": 23.35, "out": 0, "in": 1, "prov_level": false}, {"name": "Shenyang", "lon": 123.43, "lat": 41.8, "out": 0, "in": 2, "prov_level": false}, {"name": "Shenzhen", "lon": 114.06, "lat": 22.55, "out": 13, "in": 5, "prov_level": false}, {"name": "Suzhou", "lon": 120.58, "lat": 31.3, "out": 1, "in": 10, "prov_level": false}, {"name": "Taiyuan", "lon": 112.55, "lat": 37.87, "out": 0, "in": 1, "prov_level": false}, {"name": "Taizhou", "lon": 119.92, "lat": 32.46, "out": 1, "in": 6, "prov_level": false}, {"name": "Tangshan", "lon": 118.18, "lat": 39.63, "out": 0, "in": 4, "prov_level": false}, {"name": "Tianjin", "lon": 117.2, "lat": 39.08, "out": 3, "in": 2, "prov_level": false}, {"name": "Tongling", "lon": 117.81, "lat": 30.95, "out": 0, "in": 1, "prov_level": false}, {"name": "Urumqi", "lon": 87.62, "lat": 43.83, "out": 3, "in": 1, "prov_level": false}, {"name": "Wenzhou", "lon": 120.7, "lat": 28.0, "out": 0, "in": 2, "prov_level": false}, {"name": "Wuhan", "lon": 114.31, "lat": 30.59, "out": 31, "in": 1, "prov_level": false}, {"name": "Wuhu", "lon": 118.43, "lat": 31.35, "out": 8, "in": 0, "prov_level": false}, {"name": "Wuxi", "lon": 120.3, "lat": 31.57, "out": 1, "in": 1, "prov_level": false}, {"name": "Xi'an", "lon": 108.94, "lat": 34.34, "out": 2, "in": 5, "prov_level": false}, {"name": "Xiamen", "lon": 118.09, "lat": 24.48, "out": 0, "in": 2, "prov_level": false}, {"name": "Xiong'an", "lon": 115.9, "lat": 39.05, "out": 2, "in": 2, "prov_level": false}, {"name": "Xuzhou", "lon": 117.18, "lat": 34.26, "out": 1, "in": 0, "prov_level": false}, {"name": "Yangzhou", "lon": 119.42, "lat": 32.39, "out": 0, "in": 2, "prov_level": false}, {"name": "Yantai", "lon": 121.45, "lat": 37.46, "out": 1, "in": 1, "prov_level": false}, {"name": "Yichang", "lon": 111.29, "lat": 30.69, "out": 0, "in": 1, "prov_level": false}, {"name": "Zhangjiakou", "lon": 114.88, "lat": 40.82, "out": 0, "in": 1, "prov_level": false}, {"name": "Zhongshan", "lon": 113.39, "lat": 22.52, "out": 7, "in": 1, "prov_level": false}, {"name": "Zhuhai", "lon": 113.58, "lat": 22.27, "out": 0, "in": 3, "prov_level": false}, {"name": "Zibo", "lon": 118.05, "lat": 36.81, "out": 0, "in": 2, "prov_level": false}], "flows": [{"s": "Beijing", "t": "Chengdu", "n": 3}, {"s": "Beijing", "t": "Dongguan", "n": 1}, {"s": "Beijing", "t": "Fuzhou", "n": 3}, {"s": "Beijing", "t": "Guangzhou", "n": 1}, {"s": "Beijing", "t": "(Hainan prov-level)", "n": 2}, {"s": "Beijing", "t": "Mianyang", "n": 1}, {"s": "Beijing", "t": "Nanjing", "n": 3}, {"s": "Beijing", "t": "Nantong", "n": 1}, {"s": "Beijing", "t": "Shanghai", "n": 2}, {"s": "Beijing", "t": "Shenyang", "n": 2}, {"s": "Beijing", "t": "Suzhou", "n": 8}, {"s": "Beijing", "t": "Tianjin", "n": 1}, {"s": "Beijing", "t": "Wenzhou", "n": 2}, {"s": "Beijing", "t": "Xiamen", "n": 2}, {"s": "Beijing", "t": "Yangzhou", "n": 1}, {"s": "Beijing", "t": "Sanya", "n": 1}, {"s": "Beijing", "t": "Dalian", "n": 2}, {"s": "Beijing", "t": "Taiyuan", "n": 1}, {"s": "Beijing", "t": "Ningde", "n": 1}, {"s": "Beijing", "t": "Hangzhou", "n": 3}, {"s": "Beijing", "t": "Wuxi", "n": 1}, {"s": "Beijing", "t": "(Zhejiang prov-level)", "n": 3}, {"s": "Beijing", "t": "Baoding", "n": 1}, {"s": "Beijing", "t": "Chongqing", "n": 2}, {"s": "Beijing", "t": "(Henan prov-level)", "n": 1}, {"s": "Beijing", "t": "Jining", "n": 2}, {"s": "Beijing", "t": "Qingdao", "n": 2}, {"s": "Beijing", "t": "Zhangjiakou", "n": 1}, {"s": "Beijing", "t": "Wuhan", "n": 1}, {"s": "Bengbu", "t": "Handan", "n": 3}, {"s": "Chengdu", "t": "Chongqing", "n": 1}, {"s": "Chengdu", "t": "(Jiangsu prov-level)", "n": 1}, {"s": "Chengdu", "t": "Guiyang", "n": 1}, {"s": "Chengdu", "t": "(Hubei prov-level)", "n": 1}, {"s": "Chengdu", "t": "Deyang", "n": 1}, {"s": "Chengdu", "t": "Zibo", "n": 2}, {"s": "Xiong'an", "t": "Xiong'an", "n": 2}, {"s": "Guangzhou", "t": "Shantou", "n": 1}, {"s": "Guangzhou", "t": "Zhongshan", "n": 1}, {"s": "Guangzhou", "t": "Zhuhai", "n": 1}, {"s": "Guangzhou", "t": "(Henan prov-level)", "n": 1}, {"s": "Guangzhou", "t": "Beijing", "n": 2}, {"s": "Hangzhou", "t": "Taizhou", "n": 1}, {"s": "Hangzhou", "t": "Jiaxing", "n": 1}, {"s": "Hefei", "t": "Tongling", "n": 1}, {"s": "Hefei", "t": "Xi'an", "n": 1}, {"s": "Hefei", "t": "(Zhejiang prov-level)", "n": 1}, {"s": "(Henan prov-level)", "t": "Shanghai", "n": 1}, {"s": "(Henan prov-level)", "t": "Beijing", "n": 1}, {"s": "(Henan prov-level)", "t": "Shenzhen", "n": 1}, {"s": "(Henan prov-level)", "t": "(Xinjiang prov-level)", "n": 1}, {"s": "Kunming", "t": "Shenzhen", "n": 1}, {"s": "Shanghai", "t": "Tangshan", "n": 1}, {"s": "Shanghai", "t": "Beijing", "n": 3}, {"s": "Shanghai", "t": "Chongqing", "n": 2}, {"s": "Shanghai", "t": "Taizhou", "n": 2}, {"s": "Shanghai", "t": "Quanzhou", "n": 1}, {"s": "Shanghai", "t": "(Hainan prov-level)", "n": 1}, {"s": "Shanghai", "t": "Hangzhou", "n": 1}, {"s": "Shanghai", "t": "Guangzhou", "n": 1}, {"s": "Shanghai", "t": "Ningbo", "n": 1}, {"s": "Shanghai", "t": "(Yunnan prov-level)", "n": 1}, {"s": "Shanghai", "t": "Zhuhai", "n": 1}, {"s": "Shenzhen", "t": "(Hebei prov-level)", "n": 1}, {"s": "Shenzhen", "t": "Shanghai", "n": 1}, {"s": "Shenzhen", "t": "Dongguan", "n": 6}, {"s": "Shenzhen", "t": "(Gansu prov-level)", "n": 1}, {"s": "Shenzhen", "t": "(Hubei prov-level)", "n": 1}, {"s": "Shenzhen", "t": "Guangzhou", "n": 2}, {"s": "Shenzhen", "t": "Lanzhou", "n": 1}, {"s": "Beijing", "t": "(Guizhou prov-level)", "n": 1}, {"s": "Beijing", "t": "(Hebei prov-level)", "n": 2}, {"s": "Beijing", "t": "(Heilongjiang prov-level)", "n": 1}, {"s": "Beijing", "t": "Qinhuangdao", "n": 3}, {"s": "Beijing", "t": "(Shanxi prov-level)", "n": 1}, {"s": "Beijing", "t": "Ningbo", "n": 1}, {"s": "Beijing", "t": "Tangshan", "n": 3}, {"s": "Beijing", "t": "(Ningxia prov-level)", "n": 1}, {"s": "Beijing", "t": "Haikou", "n": 1}, {"s": "Suzhou", "t": "Xi'an", "n": 1}, {"s": "Tianjin", "t": "Beijing", "n": 2}, {"s": "Tianjin", "t": "(Hebei prov-level)", "n": 1}, {"s": "Wuhan", "t": "Changsha", "n": 1}, {"s": "Wuhan", "t": "Chongqing", "n": 1}, {"s": "Wuhan", "t": "Ezhou", "n": 8}, {"s": "Wuhan", "t": "Hangzhou", "n": 1}, {"s": "Wuhan", "t": "Hefei", "n": 2}, {"s": "Wuhan", "t": "Xi'an", "n": 1}, {"s": "Wuhan", "t": "Yichang", "n": 1}, {"s": "Wuhan", "t": "Shanghai", "n": 4}, {"s": "Wuhan", "t": "(Hainan prov-level)", "n": 1}, {"s": "Wuhan", "t": "Urumqi", "n": 1}, {"s": "Wuhan", "t": "Baoding", "n": 1}, {"s": "Wuhan", "t": "(Hunan prov-level)", "n": 4}, {"s": "Wuhan", "t": "Haikou", "n": 1}, {"s": "Wuhan", "t": "Guangzhou", "n": 1}, {"s": "Wuhan", "t": "(Xinjiang prov-level)", "n": 1}, {"s": "Wuhan", "t": "Jiaxing", "n": 1}, {"s": "Wuhan", "t": "Huanggang", "n": 1}, {"s": "Wuhu", "t": "Hefei", "n": 2}, {"s": "Wuhu", "t": "Shanghai", "n": 2}, {"s": "Wuhu", "t": "Beijing", "n": 2}, {"s": "Wuhu", "t": "Hangzhou", "n": 2}, {"s": "Wuxi", "t": "Shanghai", "n": 1}, {"s": "Xi'an", "t": "(Shanxi prov-level)", "n": 1}, {"s": "Xi'an", "t": "Xi'an", "n": 1}, {"s": "Xuzhou", "t": "Nanjing", "n": 1}, {"s": "(Yunnan prov-level)", "t": "Chongqing", "n": 1}, {"s": "Foshan", "t": "Guangzhou", "n": 1}, {"s": "Hohhot", "t": "Hohhot", "n": 1}, {"s": "Kunshan", "t": "Suzhou", "n": 1}, {"s": "Ningbo", "t": "Longjing", "n": 1}, {"s": "Qingdao", "t": "Tianjin", "n": 1}, {"s": "Qingdao", "t": "(Henan prov-level)", "n": 1}, {"s": "Taizhou", "t": "Yangzhou", "n": 1}, {"s": "Urumqi", "t": "Shenzhen", "n": 2}, {"s": "Urumqi", "t": "Zhuhai", "n": 1}, {"s": "Yantai", "t": "Ningbo", "n": 1}, {"s": "Kunming", "t": "Beijing", "n": 1}, {"s": "Kunming", "t": "(Hainan prov-level)", "n": 1}, {"s": "Kunming", "t": "Shanghai", "n": 4}, {"s": "Kunming", "t": "(Guangxi prov-level)", "n": 1}, {"s": "Kunming", "t": "(Guangdong prov-level)", "n": 1}, {"s": "Kunming", "t": "Chongqing", "n": 1}, {"s": "Kunming", "t": "(Hunan prov-level)", "n": 1}, {"s": "Zhongshan", "t": "Chaozhou", "n": 1}, {"s": "Zhongshan", "t": "(Tibet prov-level)", "n": 2}, {"s": "Zhongshan", "t": "Guangzhou", "n": 1}, {"s": "Zhongshan", "t": "Beijing", "n": 1}, {"s": "Zhongshan", "t": "Shenzhen", "n": 1}, {"s": "Zhongshan", "t": "(Guizhou prov-level)", "n": 1}, {"s": "Chongqing", "t": "Beijing", "n": 2}, {"s": "Dalian", "t": "Liupanshui", "n": 1}, {"s": "Dalian", "t": "Yantai", "n": 1}, {"s": "(Jiangsu prov-level)", "t": "Beijing", "n": 1}, {"s": "(Jiangsu prov-level)", "t": "Shanghai", "n": 1}, {"s": "Jiaxing", "t": "(Sichuan prov-level)", "n": 1}, {"s": "Nanjing", "t": "Suzhou", "n": 1}, {"s": "Nanjing", "t": "Beijing", "n": 1}, {"s": "(Zhejiang prov-level)", "t": "(Hainan prov-level)", "n": 1}, {"s": "(Zhejiang prov-level)", "t": "Taizhou", "n": 3}, {"s": "(Zhejiang prov-level)", "t": "Xi'an", "n": 1}]};
+const svg = d3.select('#stage');
+const W = window.innerWidth, H = window.innerHeight;
+const root = svg.append('g');
+const defs = svg.append('defs');
+defs.append('marker').attr('id', 'arr').attr('viewBox', '0 0 10 10')
+  .attr('refX', 8).attr('refY', 5).attr('markerWidth', 4.2).attr('markerHeight', 4.2)
+  .attr('orient', 'auto-start-reverse')
+  .append('path').attr('d', 'M 0 1 L 9 5 L 0 9 z').attr('fill', '#c8a45a');
+defs.append('marker').attr('id', 'arrOut').attr('viewBox', '0 0 10 10')
+  .attr('refX', 8).attr('refY', 5).attr('markerWidth', 4.2).attr('markerHeight', 4.2)
+  .attr('orient', 'auto-start-reverse')
+  .append('path').attr('d', 'M 0 1 L 9 5 L 0 9 z').attr('fill', '#e0645c');
+defs.append('marker').attr('id', 'arrIn').attr('viewBox', '0 0 10 10')
+  .attr('refX', 8).attr('refY', 5).attr('markerWidth', 4.2).attr('markerHeight', 4.2)
+  .attr('orient', 'auto-start-reverse')
+  .append('path').attr('d', 'M 0 1 L 9 5 L 0 9 z').attr('fill', '#58b89b');
+svg.call(d3.zoom().scaleExtent([0.7, 8]).on('zoom', e => root.attr('transform', e.transform)));
+
+const proj = d3.geoMercator().center([105.5, 34.5]).scale(Math.min(W, H*1.35) * 0.82).translate([W/2 + 20, H/2]);
+const path = d3.geoPath(proj);
+
+const gLand = root.append('g');
+const gArcs = root.append('g');
+const gCities = root.append('g');
+const gLabels = root.append('g');
+
+let focusCity = null, focusCorr = null;
+
+d3.json('https://cdn.jsdelivr.net/npm/datamaps@0.5.10/src/js/data/chn.topo.json')
+  .then(topo => {
+    const feats = topojson.feature(topo, topo.objects.chn).features;
+    gLand.selectAll('path').data(feats).join('path')
+      .attr('d', path).attr('fill', '#1d212b').attr('stroke', '#2c3140').attr('stroke-width', 0.6);
+    draw();
+  })
+  .catch(() => { draw(); });  // arcs still render if basemap fetch fails
+
+const cityByName = {};
+DATA.cities.forEach(c => { c.total = c.out + c.in; cityByName[c.name] = c; });
+
+function arcPath(s, t) {
+  const a = proj([s.lon, s.lat]), b = proj([t.lon, t.lat]);
+  const dx = b[0]-a[0], dy = b[1]-a[1];
+  const mx = (a[0]+b[0])/2 - dy * 0.18, my = (a[1]+b[1])/2 + dx * 0.18;
+  // pull the endpoint back toward the control point so the arrowhead clears the city dot
+  const gap = rOf(t) + 5;
+  const vx = b[0]-mx, vy = b[1]-my, vlen = Math.hypot(vx, vy) || 1;
+  const ex = b[0] - vx/vlen * gap, ey = b[1] - vy/vlen * gap;
+  return `M${a[0]},${a[1]} Q${mx},${my} ${ex},${ey}`;
+}
+function rOf(c) { return c.prov_level ? 4.5 : 3.5 + Math.sqrt(c.total) * 1.7; }
+const tip = document.getElementById('tip');
+function showTip(e, html) {
+  tip.style.display = 'block'; tip.innerHTML = html;
+  tip.style.left = Math.min(e.clientX + 14, window.innerWidth - 300) + 'px';
+  tip.style.top = (e.clientY + 12) + 'px';
+}
+
+function draw() {
+  gArcs.selectAll('path').data(DATA.flows).join('path')
+    .attr('d', f => arcPath(cityByName[f.s], cityByName[f.t]))
+    .attr('fill', 'none')
+    .attr('stroke', '#c8a45a')
+    .attr('stroke-width', f => 0.8 + Math.sqrt(f.n) * 1.1)
+    .attr('stroke-opacity', 0.42)
+    .attr('stroke-linecap', 'round')
+    .attr('marker-end', 'url(#arr)')
+    .style('cursor', 'pointer')
+    .on('mouseenter', (e, f) => showTip(e,
+      `<b>${f.s} ⟶ ${f.t}</b><div class="m">${f.n} stake${f.n>1?'s':''}: ${f.s} entities own in ${f.t}</div>`))
+    .on('mousemove', (e, f) => showTip(e,
+      `<b>${f.s} ⟶ ${f.t}</b><div class="m">${f.n} stake${f.n>1?'s':''}: ${f.s} entities own in ${f.t}</div>`))
+    .on('mouseleave', () => tip.style.display = 'none');
+
+  gCities.selectAll('.city').data(DATA.cities).join(
+    enter => enter.append(c => document.createElementNS('http://www.w3.org/2000/svg', c.prov_level ? 'rect' : 'circle')))
+    .attr('class', 'city')
+    .each(function(c) {
+      const p = proj([c.lon, c.lat]); const el = d3.select(this);
+      if (c.prov_level) {
+        el.attr('x', p[0]-4).attr('y', p[1]-4).attr('width', 8).attr('height', 8)
+          .attr('transform', `rotate(45 ${p[0]} ${p[1]})`).attr('fill', '#9aa0ad');
+      } else {
+        el.attr('cx', p[0]).attr('cy', p[1]).attr('r', rOf(c)).attr('fill', '#e8e6df');
+      }
+      el.attr('stroke', '#12141a').attr('stroke-width', 1).style('cursor', 'pointer');
+    })
+    .on('mouseenter', (e, c) => showTip(e,
+      `<b>${c.name}</b><div class="m">outbound ${c.out} · inbound ${c.in}</div>`))
+    .on('mousemove', (e, c) => showTip(e,
+      `<b>${c.name}</b><div class="m">outbound ${c.out} · inbound ${c.in}</div>`))
+    .on('mouseleave', () => tip.style.display = 'none')
+    .on('click', (e, c) => { focusCity = (focusCity === c.name) ? null : c.name; focusCorr = null;
+      d3.selectAll('.row').classed('active', false); refresh(); e.stopPropagation(); });
+
+  gLabels.selectAll('text')
+    .data(DATA.cities.filter(c => c.total >= 5 && !c.prov_level)).join('text')
+    .text(c => c.name)
+    .attr('x', c => proj([c.lon, c.lat])[0] + rOf(c) + 4)
+    .attr('y', c => proj([c.lon, c.lat])[1] + 3.5)
+    .attr('font-size', 11).attr('fill', '#c9cdd6')
+    .attr('paint-order', 'stroke').attr('stroke', '#12141a').attr('stroke-width', 3)
+    .attr('pointer-events', 'none');
+}
+
+svg.on('click', () => { focusCity = null; focusCorr = null;
+  d3.selectAll('.row').classed('active', false); refresh(); });
+
+function refresh() {
+  document.getElementById('selKey').style.display = focusCity ? 'block' : 'none';
+  gArcs.selectAll('path')
+    .attr('stroke', f => {
+      if (focusCity) { if (f.s === focusCity) return '#e0645c'; if (f.t === focusCity) return '#58b89b'; return '#c8a45a'; }
+      return '#c8a45a';
+    })
+    .attr('marker-end', f => {
+      if (focusCity) { if (f.s === focusCity) return 'url(#arrOut)'; if (f.t === focusCity) return 'url(#arrIn)'; }
+      return 'url(#arr)';
+    })
+    .attr('stroke-opacity', f => {
+      if (focusCity) return (f.s === focusCity || f.t === focusCity) ? 0.9 : 0.05;
+      if (focusCorr) { const [a,b] = focusCorr.split('|'); return (f.s===a && f.t===b) ? 0.95 : 0.06; }
+      return 0.42;
+    });
+  gCities.selectAll('.city')
+    .attr('opacity', c => {
+      if (!focusCity && !focusCorr) return 1;
+      if (focusCity) {
+        if (c.name === focusCity) return 1;
+        const linked = DATA.flows.some(f => (f.s===focusCity && f.t===c.name) || (f.t===focusCity && f.s===c.name));
+        return linked ? 1 : 0.18;
+      }
+      const [a,b] = focusCorr.split('|');
+      return (c.name===a || c.name===b) ? 1 : 0.18;
+    });
+  gLabels.selectAll('text').attr('opacity', c => {
+    if (!focusCity && !focusCorr) return 1;
+    if (focusCity) return (c.name===focusCity) ? 1 : 0.25;
+    const [a,b] = focusCorr.split('|');
+    return (c.name===a || c.name===b) ? 1 : 0.25;
+  });
+}
+
+// corridor list
+const sorted = DATA.flows.slice().sort((x,y) => y.n - x.n).slice(0, 14);
+const cl = d3.select('#corrList');
+sorted.forEach(f => {
+  cl.append('div').attr('class', 'row').attr('role','button').attr('tabindex',0)
+    .html(`<span>${f.s} <span class="a">⟶</span> ${f.t}</span><span class="n">${f.n}</span>`)
+    .on('click keydown', function(e) {
+      if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+      const key = f.s + '|' + f.t;
+      focusCorr = (focusCorr === key) ? null : key; focusCity = null;
+      d3.selectAll('.row').classed('active', false);
+      if (focusCorr) d3.select(this).classed('active', true);
+      refresh();
+    });
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  focusCity = null; focusCorr = null;
+  d3.selectAll('.row').classed('active', false); refresh();
+});
+</script>
+</body>
+</html>
